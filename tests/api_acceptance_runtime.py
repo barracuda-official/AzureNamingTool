@@ -87,24 +87,28 @@ def main():
         status, _, _ = request(base, f"{prefix}/ResourceTypes", keys["generation"])
         check(f"{prefix} generation config GET", status, 403)
 
-    mutation_path = "/api/ResourceTypes/PostConfig"
-    for role in ("read_only", "generation"):
-        status, _, _ = request(base, mutation_path, keys[role], "POST", [])
-        check(f"mutation {role}", status, 403)
+    for prefix, mutation_path in (("/api", "/api/ResourceTypes/PostConfig"),
+                                  ("/api/v2", "/api/v2/ResourceTypes")):
+        for role in ("read_only", "generation"):
+            status, _, _ = request(base, mutation_path, keys[role], "POST", [])
+            check(f"{prefix} mutation {role}", status, 403)
 
-    # Send back the existing list, so the positive control does not add a new type.
-    status, _, body = request(base, "/api/ResourceTypes", keys["full"])
-    check("full mutation input GET", status, 200)
-    if status == 200:
-        try:
-            existing_types = json.loads(body)
-            if not isinstance(existing_types, list) or not existing_types:
-                raise ValueError("unexpected type list")
-            status, _, _ = request(base, mutation_path, keys["full"], "POST", existing_types)
-            check("full permitted mutation", status, 204)
-        except (ValueError, TypeError):
-            failures.append("full mutation input structure")
-            print("full mutation input structure: FAIL")
+        # Send back the existing list, so the positive control adds no new type.
+        status, _, body = request(base, f"{prefix}/ResourceTypes", keys["full"])
+        check(f"{prefix} full mutation input GET", status, 200)
+        if status == 200:
+            try:
+                response = json.loads(body)
+                existing_types = response if prefix == "/api" else response["data"]
+                if not isinstance(existing_types, list) or not existing_types:
+                    raise ValueError("unexpected type list")
+                status, _, body = request(base, mutation_path, keys["full"], "POST", existing_types)
+                success = True if prefix == "/api" else json.loads(body).get("success") is True
+                check(f"{prefix} full permitted mutation", status,
+                      204 if prefix == "/api" else 200, success)
+            except (ValueError, TypeError, KeyError):
+                failures.append(f"{prefix} full mutation input structure")
+                print(f"{prefix} full mutation input structure: FAIL")
 
     name_request = {
         "resourceType": "st", "resourceEnvironment": "dev", "resourceLocation": "auc",
@@ -113,21 +117,24 @@ def main():
     }
     instances = list(range(10, 100))
     secrets.SystemRandom().shuffle(instances)
-    for role in ("generation", "full"):
-        status, success = 0, False
-        for _ in range(10):
-            name_request["resourceInstance"] = f"{instances.pop():02d}"
-            status, _, body = request(base, "/api/ResourceNamingRequests/RequestName",
-                                      keys[role], "POST", name_request)
-            try:
-                result = json.loads(body)
-                success = result.get("success") is True
-                duplicate = status == 400 and "already exists" in str(result.get("message", ""))
-            except (ValueError, TypeError):
-                duplicate = False
-            if not duplicate:
-                break
-        check(f"name generation {role}", status, 200, success)
+    for prefix in ("/api", "/api/v2"):
+        name_path = f"{prefix}/ResourceNamingRequests/RequestName"
+        status, _, _ = request(base, name_path, keys["read_only"], "POST", name_request)
+        check(f"{prefix} name generation read_only", status, 403)
+        for role in ("generation", "full"):
+            status, success = 0, False
+            for _ in range(10):
+                name_request["resourceInstance"] = f"{instances.pop():02d}"
+                status, _, body = request(base, name_path, keys[role], "POST", name_request)
+                try:
+                    result = json.loads(body)
+                    success = result.get("success") is True
+                    duplicate = status == 400 and "already exists" in str(result.get("message", ""))
+                except (ValueError, TypeError):
+                    duplicate = False
+                if not duplicate:
+                    break
+            check(f"{prefix} name generation {role}", status, 200, success)
 
     if args.log_file:
         logged = args.log_file.read_text(errors="replace")
