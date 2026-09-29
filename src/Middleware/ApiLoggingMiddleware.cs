@@ -56,48 +56,27 @@ namespace AzureNamingTool.Middleware
             var correlationId = context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier;
             var stopwatch = Stopwatch.StartNew();
 
-            // Log request
-            await LogRequestAsync(context, correlationId);
-
-            // Capture original response body stream
-            var originalBodyStream = context.Response.Body;
-
-            using (var responseBody = new MemoryStream())
+            LogRequest(context, correlationId);
+            try
             {
-                context.Response.Body = responseBody;
-
-                try
-                {
-                    await _next(context);
-
-                    stopwatch.Stop();
-
-                    // Log response
-                    await LogResponseAsync(context, correlationId, stopwatch.ElapsedMilliseconds);
-                }
-                catch (Exception ex)
-                {
-                    stopwatch.Stop();
-                    
-                    _logger.LogError(ex,
-                        "API request failed. Method: {Method}, Path: {Path}, CorrelationId: {CorrelationId}, Duration: {Duration}ms",
-                        SanitizeForLog(context.Request.Method),
-                        SanitizeForLog(context.Request.Path.ToString()),
-                        correlationId,
-                        stopwatch.ElapsedMilliseconds);
-
-                    throw;
-                }
-                finally
-                {
-                    // Copy response body back to original stream
-                    responseBody.Seek(0, SeekOrigin.Begin);
-                    await responseBody.CopyToAsync(originalBodyStream);
-                }
+                await _next(context);
+                stopwatch.Stop();
+                LogResponse(context, correlationId, stopwatch.ElapsedMilliseconds);
+            }
+            catch (Exception)
+            {
+                stopwatch.Stop();
+                _logger.LogError(
+                    "API request failed. Method: {Method}, Path: {Path}, CorrelationId: {CorrelationId}, Duration: {Duration}ms",
+                    SanitizeForLog(context.Request.Method),
+                    SanitizeForLog(context.Request.Path.ToString()),
+                    correlationId,
+                    stopwatch.ElapsedMilliseconds);
+                throw;
             }
         }
 
-        private async Task LogRequestAsync(HttpContext context, string correlationId)
+        private void LogRequest(HttpContext context, string correlationId)
         {
             var request = context.Request;
 
@@ -105,40 +84,18 @@ namespace AzureNamingTool.Middleware
             var requestDetails = new StringBuilder();
             requestDetails.AppendLine($"API Request:");
             requestDetails.AppendLine($"  Method: {SanitizeForLog(request.Method)}");
-            requestDetails.AppendLine($"  Path: {SanitizeForLog(request.Path.ToString())}{SanitizeForLog(request.QueryString.ToString())}");
+            requestDetails.AppendLine($"  Path: {SanitizeForLog(request.Path.ToString())}");
             requestDetails.AppendLine($"  CorrelationId: {SanitizeForLog(correlationId)}");
             
-            // Log API key info (first few characters only for security)
-            if (request.Headers.TryGetValue("APIKey", out var apiKey))
+            if (request.Headers.ContainsKey("APIKey"))
             {
-                var sanitizedKey = SanitizeForLog(apiKey.ToString());
-                var maskedKey = sanitizedKey.Length > 8 
-                    ? sanitizedKey.Substring(0, 8) + "..." 
-                    : "***";
-                requestDetails.AppendLine($"  APIKey: {maskedKey}");
-            }
-
-            // Log request body for POST/PUT requests (if not too large)
-            if ((request.Method == "POST" || request.Method == "PUT") && request.ContentLength > 0 && request.ContentLength < 10000)
-            {
-                request.EnableBuffering();
-                var buffer = new byte[Convert.ToInt32(request.ContentLength)];
-                int totalRead = 0;
-                int bytesRead;
-                while (totalRead < buffer.Length && (bytesRead = await request.Body.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead))) > 0)
-                {
-                    totalRead += bytesRead;
-                }
-                var bodyAsText = Encoding.UTF8.GetString(buffer, 0, totalRead);
-                request.Body.Position = 0; // Reset stream position
-
-                requestDetails.AppendLine($"  Body: {SanitizeForLog(bodyAsText)}");
+                requestDetails.AppendLine("  APIKey: present");
             }
 
             _logger.LogInformation(requestDetails.ToString());
         }
 
-        private async Task LogResponseAsync(HttpContext context, string correlationId, long durationMs)
+        private void LogResponse(HttpContext context, string correlationId, long durationMs)
         {
             var response = context.Response;
 
@@ -152,19 +109,6 @@ namespace AzureNamingTool.Middleware
             responseDetails.AppendLine($"  StatusCode: {response.StatusCode}");
             responseDetails.AppendLine($"  CorrelationId: {correlationId}");
             responseDetails.AppendLine($"  Duration: {durationMs}ms");
-
-            // Log response body for errors or if response is small
-            if ((response.StatusCode >= 400 || durationMs > 5000) && response.Body.Length < 10000)
-            {
-                response.Body.Seek(0, SeekOrigin.Begin);
-                var bodyAsText = await new StreamReader(response.Body).ReadToEndAsync();
-                response.Body.Seek(0, SeekOrigin.Begin);
-
-                if (!string.IsNullOrWhiteSpace(bodyAsText))
-                {
-                    responseDetails.AppendLine($"  Body: {bodyAsText}");
-                }
-            }
 
             _logger.Log(logLevel, responseDetails.ToString());
 

@@ -90,7 +90,7 @@ The Azure Naming Tool uses API key authentication with **three distinct key type
 **Permissions**:
 - ✅ Name generation endpoints (`RequestName`, `RequestNameWithComponents`)
 - ✅ Name validation endpoint (`ValidateName`)
-- ✅ Read-only access to configuration endpoints (GET requests)
+- ❌ Generic configuration GET requests
 - ❌ Configuration modifications (POST to config endpoints)
 - ❌ Administrative functions
 
@@ -108,7 +108,8 @@ The Azure Naming Tool uses API key authentication with **three distinct key type
 **Purpose**: View-only access to configurations
 
 **Permissions**:
-- ✅ All GET endpoints (read configuration data)
+- ✅ Read-only configuration GET endpoints
+- ❌ Import/export and administrative GET endpoints
 - ❌ Name generation endpoints
 - ❌ All POST endpoints (no write access)
 - ❌ Configuration modifications
@@ -123,6 +124,8 @@ The Azure Naming Tool uses API key authentication with **three distinct key type
 **Security Note**: Safest key type for third-party integrations and read-only access scenarios.
 
 ---
+
+**Export scope:** `ImportExport/ExportConfiguration` requires the Full API Access Key for both `includeAdmin=true` and `includeAdmin=false`. The latter still includes generated names and administrative log data. Valid lower-scope keys receive HTTP 403; missing or invalid keys receive HTTP 401.
 
 ### API Key Management
 
@@ -244,7 +247,7 @@ The `ValidateName` endpoint validates names using Azure resource type regex patt
 ### Configuration Management
 
 All configuration endpoints support:
-- **GET** (list all items): Requires any API key
+- **GET** (list configuration items): Requires Full or Read-Only API key
 - **POST** (create/update): Requires Full Access API key
 
 Configuration categories:

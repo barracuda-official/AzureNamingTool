@@ -189,7 +189,7 @@ V2 uses the **same authentication system as V1** with three API key types:
 ---
 
 #### 2. 🔧 Name Generation API Access Key
-**Permissions**: Name generation and read-only configuration access
+**Permissions**: Name generation and validation only
 
 **Use Cases**:
 - CI/CD pipelines
@@ -199,7 +199,7 @@ V2 uses the **same authentication system as V1** with three API key types:
 ---
 
 #### 3. 👁️ Read-Only API Access Key
-**Permissions**: View-only access to configurations
+**Permissions**: Approved configuration GET endpoints only; import/export and administrative endpoints require Full Access
 
 **Use Cases**:
 - Auditing and reporting
@@ -207,6 +207,8 @@ V2 uses the **same authentication system as V1** with three API key types:
 - Documentation generation
 
 ---
+
+**Export scope:** `ImportExport/ExportConfiguration` requires the Full API Access Key for both `includeAdmin=true` and `includeAdmin=false`. The latter still includes generated names and administrative log data. Valid lower-scope keys receive HTTP 403; missing or invalid keys receive HTTP 401.
 
 **Authentication Header**:
 ```http
